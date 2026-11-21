@@ -1,7 +1,7 @@
 <img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/24fe2731-5dda-4342-9578-bd9e6f4331dd" />
 
 
-# RKN Watcher v3.1.0
+# RKN Watcher v3.2.1
 
 RKN Watcher is a set of scripts for Debian/Ubuntu Linux servers that:
 
@@ -16,16 +16,34 @@ RKN Watcher is a set of scripts for Debian/Ubuntu Linux servers that:
 - keeps the v3 atomic `ipset` update and duplicate-rule protections;
 - protects the complete JSON configuration read-modify-write cycle with a file lock, so concurrent edits do not lose entries;
 - interprets legacy boolean values such as `"false"` safely instead of accidentally enabling GeoIP;
-- rejects IPv6 addresses and networks consistently: this release supports IPv4 `ipset` sets only;
+- rejects unsupported entries consistently (IPv6 was rejected back then; since v3.2.1 it is supported);
 - validates the checksum manifest in GitHub Actions and documents checksum verification before publishing;
 - expands mock coverage for concurrent configuration edits, boolean normalization, and IPv6 rejection.
+
+## Key changes in v3.2.1
+
+- modular layout: `lib/*.sh` instead of a 2050-line monolith;
+- IPv6 support for allow/deny lists (`*6` sets, `RKN_GEOIP_HOOK6` chain in `ip6tables`);
+- `NETFILTER_BACKEND=auto|legacy|nft` with `doctor` verification;
+- age-based snapshot rotation and `rkn-watcher snapshots`.
+
+## Key changes in v3.2
+
+- **fail-open fixed**: legacy booleans in `settings.conf` (`"true"`, `"1"`, `"on"`) no longer silently disable blocking; invalid values are hard errors;
+- **no more self-lockout**: `RKN_GEOIP_HOOK` now returns for `-i lo` and `conntrack ESTABLISHED,RELATED`; new `allow-my-ip` command and an SSH-IP prompt before enabling GeoIP;
+- **allow/deny ports always work**: denials moved into `RKN_DENY`, independent of `FILTER_PORTS`;
+- **atomic apply**: a single `iptables-restore` instead of a chain of `iptables -A`;
+- IPv6 blocking (`TSPUIPS6`/`GOVIPS6`), `PORT_POLICY=strict`, list sanity gate, conditional GET, `doctor`/`metrics`/`status --json`/`--dry-run`/`snapshot`/`rollback`, logrotate, systemd hardening, CI checks.
+- `install`/`update` through the `/usr/local/bin` symlink now works.
 
 ## Repository layout
 
 ```text
-RCN/
+RKN-Watcher/
 ├── installer.sh
-├── rkn-watcher.sh
+├── release.sh
+├── rkn-watcher.sh          # 16-line entry point
+├── lib/                    # config, common, firewall, snapshots, lists, services, ui, cli
 ├── config_tool.py
 ├── geoip_apply.py
 ├── README.ru.md / README.en.md
@@ -41,8 +59,8 @@ RCN/
 ## Quick start
 
 ```bash
-git clone https://github.com/Balbuto/RCN.git
-cd RCN
+git clone https://github.com/Balbuto/RKN-Watcher.git
+cd RKN-Watcher
 chmod +x installer.sh rkn-watcher.sh
 sudo ./installer.sh
 ```
@@ -84,14 +102,32 @@ sudo rkn-watcher
 
 - Debian 11 / 12
 - Ubuntu 20.04 / 22.04 / 24.04
-- IPv4 for country-based GeoIP
+- IPv4 and IPv6 (IPv6 activates automatically when `ip6tables` is present)
+- `legacy` and `nft` netfilter backends (selected via `NETFILTER_BACKEND`)
 - `root` privileges are required
+
+## Things to know about v3.2.1
+
+- **Modules.** The script is an entry point plus the `lib/` directory. When upgrading
+  manually, copy `lib/` too; `installer.sh` and `rkn-watcher install` do it for you.
+- **IPv6.** Allow/deny addresses and CIDRs are accepted for both families and enforced
+  in `ip6tables`; without `ip6tables` the IPv6 part is skipped with a warning.
+- **Backend.** If both `iptables-legacy` and `iptables-nft` exist, set the intended one
+  and verify with `sudo rkn-watcher doctor | grep -i backend`.
+- **nftables.** The installer verifies the `nftables` package, the `nft` binary and
+  ruleset readability, and shows which backend `iptables` uses; it stops on failure.
+  Standalone: `sudo ./installer.sh nft`.
+- **Snapshots.** The last `SNAPSHOT_KEEP` (10) and everything younger than
+  `SNAPSHOT_MAX_AGE_DAYS` (30 days) are kept. Roll back with `sudo rkn-watcher rollback`.
 
 ## Data sources
 
 - TSPU / Skipa CIDR: `https://github.com/tread-lightly/CyberOK_Skipa_ips`
 - GOVIPS / blacklist-v4.ipset: `https://github.com/C24Be/AS_Network_List`
 - Country CIDR: `https://www.ipdeny.com/ipblocks/`
+
+These sources are third-party and unsigned — a known limitation (see
+[Security](docs/en/SECURITY.md)), partially mitigated by the list sanity gate.
 
 ## Documentation
 

@@ -2,7 +2,7 @@
 <img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/d0da5390-0cd6-4d60-ba0e-bf410dd1ff91" />
 
 
-# RKN Watcher v3.1.0
+# RKN Watcher v3.2.1
 
 Choose documentation language:
 

@@ -23,15 +23,15 @@ DEFAULT_BLACKLIST = {
 
 
 def normalize_ip(value: str) -> str:
+    """IPv4 и IPv6: семейство определяется автоматически.
+
+    IPv6-записи попадают в отдельные inet6-наборы (см. geoip_apply.py).
+    """
     value = value.strip()
     if "/" in value:
         network = ipaddress.ip_network(value, strict=False)
-        if network.version != 4:
-            raise ValueError("only IPv4 addresses and networks are supported")
         return str(network)
     address = ipaddress.ip_address(value)
-    if address.version != 4:
-        raise ValueError("only IPv4 addresses and networks are supported")
     return str(address)
 
 
@@ -87,6 +87,8 @@ def load_json(path: str, default: dict) -> dict:
 def save_json_atomic(path: str, data: dict) -> None:
     fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path), prefix=os.path.basename(path) + ".", text=True)
     try:
+        # секретов в файле нет, но права должны быть предсказуемыми
+        os.fchmod(fd, 0o644)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=4, ensure_ascii=False, sort_keys=True)
             fh.write("\n")
@@ -142,6 +144,42 @@ def set_enabled(value: str):
     return 0
 
 
+def normalize_file(path: str, default: dict, keys: tuple) -> str:
+    """Перезаписывает файл нормализованными значениями (или создаёт его).
+
+    Раньше нормализация происходила только в памяти при чтении, поэтому
+    legacy-значения из старых версий оставались в файле навсегда.
+    """
+    def update(data):
+        changed = False
+        for key in keys:
+            if key not in default:
+                continue
+            value = data.get(key, default[key])
+            normalized = load_json_value(key, value)
+            if data.get(key) != normalized:
+                changed = True
+            data[key] = normalized
+        # даже без изменений перезаписываем, чтобы поправить формат/права
+        return True, "NORMALIZED" if changed else "UNCHANGED"
+
+    result = update_json_locked(path, default, update)
+    os.chmod(path, 0o644)
+    return result
+
+
+def load_json_value(key, value):
+    if key == "countries":
+        return sorted({normalize_country(v) for v in value})
+    if key == "ips":
+        return sorted({normalize_ip(v) for v in value})
+    if key == "ports":
+        return sorted({normalize_port(str(v)) for v in value})
+    if key == "enabled":
+        return normalize_enabled(value)
+    return value
+
+
 def get_enabled():
     data = load_json(WHITELIST_FILE, DEFAULT_WHITELIST)
     print("true" if data.get("enabled", False) else "false")
@@ -165,7 +203,9 @@ def show(which: str):
 
 def main(argv):
     if len(argv) < 2:
-        print("Usage: config_tool.py <command> [args...]", file=sys.stderr)
+        print("Usage: config_tool.py <add-country|remove-country|add-ip|remove-ip|add-port|"
+              "remove-port|add-deny-ip|remove-deny-ip|add-deny-port|remove-deny-port|"
+              "set-enabled|get-enabled|normalize|show> [args...]", file=sys.stderr)
         return 1
     cmd = argv[1]
     try:
@@ -193,6 +233,11 @@ def main(argv):
             return set_enabled(argv[2])
         if cmd == "get-enabled":
             return get_enabled()
+        if cmd == "normalize":
+            wl = normalize_file(WHITELIST_FILE, DEFAULT_WHITELIST, ("enabled", "countries", "ips", "ports"))
+            bl = normalize_file(BLACKLIST_FILE, DEFAULT_BLACKLIST, ("ips", "ports"))
+            print(f"whitelist:{wl} blacklist:{bl}")
+            return 0
         if cmd == "show":
             which = argv[2] if len(argv) > 2 else "all"
             return show(which)
