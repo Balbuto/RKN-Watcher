@@ -20,12 +20,30 @@ jobs:
         run: |
           bash -n installer.sh
           bash -n rkn-watcher.sh
+          bash -n tests/run_tests.sh
+          bash -n release.sh
+
+      - name: ShellCheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          shellcheck -S warning --shell=bash installer.sh rkn-watcher.sh tests/run_tests.sh release.sh
 
       - name: Python syntax check
         run: |
           python3 -m py_compile config_tool.py geoip_apply.py
 
+      - name: Python style (pyflakes)
+        run: |
+          python3 -m pip install --quiet pyflakes
+          python3 -m pyflakes config_tool.py geoip_apply.py
+
       - name: Run mock tests
         run: |
           chmod +x tests/run_tests.sh
           ./tests/run_tests.sh
+
+      - name: Verify checksum manifest
+        run: |
+          chmod +x release.sh
+          ./release.sh --check
